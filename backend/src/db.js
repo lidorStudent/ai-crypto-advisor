@@ -1,15 +1,17 @@
 // backend/src/db.js
+// Tiny SQLite wrapper for users, preferences, and feedback (like/dislike).
+// Goal here: keep it simple, readable, and stable. No functional changes.
 
 const path = require("path");
 const sqlite3 = require("sqlite3").verbose();
-const DB_FILE = process.env.DB_FILE || path.join(__dirname, "..", "database.sqlite");
 
 /* ────────────────────────────────────────────────────────────
    Database connection
    - Uses a single SQLite file at project root: ./database.sqlite
    - Safe to import across the app (one process).
    ──────────────────────────────────────────────────────────── */
-const db = new sqlite3.Database(DB_FILE);
+const dbFile = path.join(__dirname, "..", "database.sqlite");
+const db = new sqlite3.Database(dbFile);
 
 /* ────────────────────────────────────────────────────────────
    init()
@@ -325,7 +327,6 @@ function getAllFeedbackForType(userId, targetType, limit = 1000) {
    Exports
    ──────────────────────────────────────────────────────────── */
 module.exports = {
-  db,
   init,
   // users
   getUserByEmail,
