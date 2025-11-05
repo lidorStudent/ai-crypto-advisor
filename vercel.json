@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://ai-crypto-advisor-i6l8.onrender.com/api/$1"
+    }
+  ]
+}
