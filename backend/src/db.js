@@ -2,14 +2,14 @@
 
 const path = require("path");
 const sqlite3 = require("sqlite3").verbose();
+const DB_FILE = process.env.DB_FILE || path.join(__dirname, "..", "database.sqlite");
 
 /* ────────────────────────────────────────────────────────────
    Database connection
    - Uses a single SQLite file at project root: ./database.sqlite
    - Safe to import across the app (one process).
    ──────────────────────────────────────────────────────────── */
-const dbFile = path.join(__dirname, "..", "database.sqlite");
-const db = new sqlite3.Database(dbFile);
+const db = new sqlite3.Database(DB_FILE);
 
 /* ────────────────────────────────────────────────────────────
    init()
@@ -325,6 +325,7 @@ function getAllFeedbackForType(userId, targetType, limit = 1000) {
    Exports
    ──────────────────────────────────────────────────────────── */
 module.exports = {
+  db,
   init,
   // users
   getUserByEmail,
