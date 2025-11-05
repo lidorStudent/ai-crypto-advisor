@@ -83,8 +83,8 @@ process.on("uncaughtException", (err) => {
     // Initialize DB schema (safe to call multiple times).
     if (typeof db.init === "function") {
       await db.init(); // supports sync or async init
-      console.log("DB_FILE:", process.env.DB_FILE || "(default ./database.sqlite)");
     }
+    console.log("DB_FILE:", process.env.DB_FILE || "(default ./database.sqlite)");
     app.listen(port, "0.0.0.0", () => {
       console.log(`Server listening on http://localhost:${port}`);
     });
