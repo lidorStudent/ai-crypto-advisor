@@ -4,14 +4,100 @@
 
 const path = require("path");
 const sqlite3 = require("sqlite3").verbose();
+const { createClient } = require("@libsql/client");
 
-/* ────────────────────────────────────────────────────────────
-   Database connection
-   - Uses a single SQLite file at project root: ./database.sqlite
-   - Safe to import across the app (one process).
-   ──────────────────────────────────────────────────────────── */
-const dbFile = path.join(__dirname, "..", "database.sqlite");
-const db = new sqlite3.Database(dbFile);
+// ────────────────────────────────────────────────────────────
+// Dual-mode DB: local SQLite file (default) OR remote libSQL/Turso
+// Pick remote if LIBSQL_URL is set. Otherwise use ./database.sqlite
+// ────────────────────────────────────────────────────────────
+const DB_FILE =
+  process.env.DB_FILE || path.join(__dirname, "..", "database.sqlite");
+const LIBSQL_URL = process.env.LIBSQL_URL || "";
+const LIBSQL_AUTH_TOKEN = process.env.LIBSQL_AUTH_TOKEN || "";
+
+let db;
+let mode = "local";
+
+if (LIBSQL_URL) {
+  // Remote (Turso/libSQL) adapter that mimics the subset of sqlite3 API used here
+  mode = "remote";
+  const client = createClient({
+    url: LIBSQL_URL,
+    authToken: LIBSQL_AUTH_TOKEN || undefined,
+  });
+
+  // Helper to bind a "this" with lastID like sqlite3 does
+  function withLastIdContext(cb, res) {
+    if (typeof cb !== "function") return;
+    // libSQL returns lastInsertRowid (BigInt) for INSERTs
+    const lastID =
+      typeof res?.lastInsertRowid !== "undefined"
+        ? Number(res.lastInsertRowid)
+        : // Fallback: if someone used RETURNING id
+          (res?.rows?.[0] && Number(res.rows[0].id)) || 0;
+    cb.call({ lastID }, null);
+  }
+
+  db = {
+    // sqlite3.Database#run(sql, params?, cb)
+    run(sql, params = [], cb = () => {}) {
+      client
+        .execute({ sql, args: params })
+        .then((res) => withLastIdContext(cb, res))
+        .catch((e) => cb(e));
+    },
+
+    // sqlite3.Database#get(sql, params?, cb(row))
+    get(sql, params = [], cb = () => {}) {
+      client
+        .execute({ sql, args: params })
+        .then((res) => cb(null, (res.rows && res.rows[0]) || undefined))
+        .catch((e) => cb(e));
+    },
+
+    // sqlite3.Database#all(sql, params?, cb(rows))
+    all(sql, params = [], cb = () => {}) {
+      client
+        .execute({ sql, args: params })
+        .then((res) => cb(null, res.rows || []))
+        .catch((e) => cb(e));
+    },
+
+    // sqlite3.Database#serialize(fn)
+    serialize(fn) {
+      // libSQL is already consistent; just invoke synchronously
+      try {
+        fn && fn();
+      } catch (e) {
+        // there is no serialize error path in sqlite3; callers handle errors in run/get/all callbacks
+        // so we simply surface async errors via those callbacks above
+      }
+    },
+
+    // Minimal prepare() shim to support stmt.run(...) / stmt.finalize()
+    // We only use it for INSERT INTO users ... in createUser()
+    prepare(sql) {
+      return {
+        run(params, cb) {
+          client
+            .execute({ sql, args: params })
+            .then((res) => withLastIdContext(cb, res))
+            .catch((e) => cb && cb(e));
+        },
+        finalize(cb) {
+          // No-op for libSQL; keep API parity
+          if (typeof cb === "function") cb();
+        },
+      };
+    },
+  };
+} else {
+  // Local file SQLite (dev/default)
+  const sqlite = new sqlite3.Database(DB_FILE);
+  db = sqlite;
+}
+
+console.log(`[db] mode: ${mode}${mode === "local" ? ` (${DB_FILE})` : ""}`);
 
 /* ────────────────────────────────────────────────────────────
    init()
@@ -130,7 +216,7 @@ function createUser({ name, email, passwordHash }) {
     );
     stmt.run([name, email, passwordHash], function (err) {
       if (err) return reject(err);
-      resolve(this.lastID); // sqlite last inserted row id
+      resolve(this.lastID); // sqlite-style last inserted row id (adapter emulates for remote)
     });
     stmt.finalize();
   });
