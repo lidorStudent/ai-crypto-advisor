@@ -41,19 +41,13 @@ const FALLBACK_NEWS = [
 
 const STATIC_MEMES = [
   {
-    id: "meme-1",
+    id: "meme-2",
     title: "When BTC dumps 2% and CT panics",
     img: "https://images.unsplash.com/photo-1622630998477-20aa696ecb05?auto=format&fit=crop&w=900&q=60",
     source: "static-json",
   },
   {
-    id: "meme-2",
-    title: "HODL means HODL 💎",
-    img: "https://images.unsplash.com/photo-1621412643066-2f2c6d8b5242?auto=format&fit=crop&w=900&q=60",
-    source: "static-json",
-  },
-  {
-    id: "meme-3",
+    id: "meme-1",
     title: "Me refreshing prices every 5 seconds",
     img: "/memes/meme1.jpg",
     source: "static-json",
@@ -405,14 +399,9 @@ async function doFetch(key) {
     headers["x-cg-demo-api-key"] = process.env.COINGECKO_DEMO_API_KEY;
   }
 
-  const json = await doFetchWithHeaders(url, headers);
-  return json;
-}
-
-async function doFetchWithHeaders(url, headers) {
   const json = await fetchWithBackoff(url, { headers }, 3);
   if (!json || !Object.keys(json).length) throw new Error("Empty price payload");
-  const key = new URL(url).searchParams.get("ids");
+
   PRICE_CACHE.set(key, { ts: Date.now(), data: json });
   return json;
 }
@@ -429,16 +418,7 @@ function scheduleBackgroundRefresh(key) {
 
     const p = (async () => {
       try {
-        const url =
-          `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(key)}` +
-          `&vs_currencies=usd&include_24hr_change=true`;
-        const headers = { "User-Agent": "ai-crypto-advisor/1.0 (+yourdomain)" };
-        if (process.env.COINGECKO_PRO_API_KEY) {
-          headers["x-cg-pro-api-key"] = process.env.COINGECKO_PRO_API_KEY;
-        } else if (process.env.COINGECKO_DEMO_API_KEY) {
-          headers["x-cg-demo-api-key"] = process.env.COINGECKO_DEMO_API_KEY;
-        }
-        return await doFetchWithHeaders(url, headers);
+        return await doFetch(key);
       } finally {
         INFLIGHT.delete(key);
       }
@@ -465,16 +445,7 @@ async function fetchPrices(assets) {
   if (tryConsumeToken()) {
     const p = (async () => {
       try {
-        const url =
-          `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(key)}` +
-          `&vs_currencies=usd&include_24hr_change=true`;
-        const headers = { "User-Agent": "ai-crypto-advisor/1.0 (+yourdomain)" };
-        if (process.env.COINGECKO_PRO_API_KEY) {
-          headers["x-cg-pro-api-key"] = process.env.COINGECKO_PRO_API_KEY;
-        } else if (process.env.COINGECKO_DEMO_API_KEY) {
-          headers["x-cg-demo-api-key"] = process.env.COINGECKO_DEMO_API_KEY;
-        }
-        return await doFetchWithHeaders(url, headers);
+        return await doFetch(key);
       } catch (err) {
         console.warn("Price fetch failed, serving cache/fallback:", err.message);
         if (PRICE_CACHE.has(key)) return PRICE_CACHE.get(key).data;
@@ -660,8 +631,50 @@ async function fetchAiInsight(userInfo, prefs) {
 }
 
 /* ===========================================
- * MEMES (Reddit) — large feed + dedupe + cache
+ * MEMES (Reddit) — now via OAuth (client creds)
  * ========================================= */
+
+// ⬇️ NEW: Reddit app-only OAuth (token cached in-memory)
+const REDDIT_CLIENT_ID = (process.env.REDDIT_CLIENT_ID || "").trim();
+const REDDIT_CLIENT_SECRET = (process.env.REDDIT_CLIENT_SECRET || "").trim();
+
+let REDDIT_TOKEN = null;
+let REDDIT_TOKEN_EXP = 0; // epoch ms
+
+async function getRedditAppToken() {
+  const now = Date.now();
+  if (REDDIT_TOKEN && now < REDDIT_TOKEN_EXP - 10_000) return REDDIT_TOKEN;
+
+  if (!REDDIT_CLIENT_ID || !REDDIT_CLIENT_SECRET) {
+    throw new Error("Missing REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET");
+  }
+
+  const f = await getFetch();
+  const basic = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString("base64");
+  const resp = await f("https://www.reddit.com/api/v1/access_token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "ai-crypto-advisor/1.0 (by u/userless)",
+    },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      scope: "read",
+    }),
+  });
+
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => "");
+    throw new Error(`Reddit token error: ${resp.status} ${t}`);
+  }
+  const json = await resp.json();
+  REDDIT_TOKEN = json.access_token;
+  const expiresSec = Number(json.expires_in || 3600);
+  REDDIT_TOKEN_EXP = now + expiresSec * 1000;
+  return REDDIT_TOKEN;
+}
+
 const MEME_SUBS = ["CryptoCurrencyMemes", "cryptomemes", "BitcoinMemes"];
 const MEME_SORTS = [
   { sort: "top", t: "day" },
@@ -710,12 +723,15 @@ function _pickImageFromPost(d) {
   return null;
 }
 
+// ⬇️ UPDATED: use OAuth API + Bearer token
 async function _fetchRedditListing(url, after = null) {
   const sep = url.includes("?") ? "&" : "?";
   const finalUrl = after ? `${url}${sep}after=${encodeURIComponent(after)}` : url;
 
+  const token = await getRedditAppToken();
   const headers = {
-    "User-Agent": "ai-crypto-advisor/1.0 (+https://example.com)",
+    Authorization: `Bearer ${token}`,
+    "User-Agent": "ai-crypto-advisor/1.0 (by u/userless)",
     Accept: "application/json",
   };
   const f = await getFetch();
@@ -724,8 +740,9 @@ async function _fetchRedditListing(url, after = null) {
   return res.json();
 }
 
+// ⬇️ UPDATED: switch to oauth.reddit.com base
 async function _fetchOneSource(sub, sort, t) {
-  let url = `https://www.reddit.com/r/${sub}/${sort}.json?limit=100`;
+  let url = `https://oauth.reddit.com/r/${sub}/${sort}.json?limit=100`;
   if (t) url += `&t=${t}`;
 
   const aggregated = [];
@@ -983,30 +1000,6 @@ async function getDashboard(req, res) {
   }
 }
 
-/* ---------------------------
- * MEME ROUTE (auth required)
- * ------------------------- */
-// GET /api/dashboard/meme
-async function getMemeHandler(req, res) {
-  res.setHeader("Cache-Control", "no-store");
-  try {
-    const prefsRow = await getPreferencesByUser(req.userId);
-    const prefs = prefsRow
-      ? {
-          assets: prefsRow.assets ? JSON.parse(prefsRow.assets) : [],
-          investorType: prefsRow.investor_type || "",
-          contentTypes: prefsRow.content_types ? JSON.parse(prefsRow.content_types) : [],
-        }
-      : { assets: [], investorType: "" };
-
-    const meme = await getRandomMemeForUser(req.userId, prefs);
-    return res.json(meme || STATIC_MEMES[0]);
-  } catch (e) {
-    console.warn("[meme] failed:", e.message);
-    return res.json(STATIC_MEMES[0]);
-  }
-}
-
 /* -------------
  * Exports
  * ----------- */
@@ -1018,5 +1011,4 @@ module.exports = {
   getRandomMemeForUser, // non-breaking additional export
   getNewsCachedHandler, // GET /api/dashboard/news
   refreshNewsHandler,   // POST /api/dashboard/news/refresh
-  getMemeHandler,       // GET /api/dashboard/meme
 };
