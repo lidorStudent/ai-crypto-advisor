@@ -405,9 +405,14 @@ async function doFetch(key) {
     headers["x-cg-demo-api-key"] = process.env.COINGECKO_DEMO_API_KEY;
   }
 
+  const json = await doFetchWithHeaders(url, headers);
+  return json;
+}
+
+async function doFetchWithHeaders(url, headers) {
   const json = await fetchWithBackoff(url, { headers }, 3);
   if (!json || !Object.keys(json).length) throw new Error("Empty price payload");
-
+  const key = new URL(url).searchParams.get("ids");
   PRICE_CACHE.set(key, { ts: Date.now(), data: json });
   return json;
 }
@@ -424,7 +429,16 @@ function scheduleBackgroundRefresh(key) {
 
     const p = (async () => {
       try {
-        return await doFetch(key);
+        const url =
+          `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(key)}` +
+          `&vs_currencies=usd&include_24hr_change=true`;
+        const headers = { "User-Agent": "ai-crypto-advisor/1.0 (+yourdomain)" };
+        if (process.env.COINGECKO_PRO_API_KEY) {
+          headers["x-cg-pro-api-key"] = process.env.COINGECKO_PRO_API_KEY;
+        } else if (process.env.COINGECKO_DEMO_API_KEY) {
+          headers["x-cg-demo-api-key"] = process.env.COINGECKO_DEMO_API_KEY;
+        }
+        return await doFetchWithHeaders(url, headers);
       } finally {
         INFLIGHT.delete(key);
       }
@@ -451,7 +465,16 @@ async function fetchPrices(assets) {
   if (tryConsumeToken()) {
     const p = (async () => {
       try {
-        return await doFetch(key);
+        const url =
+          `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(key)}` +
+          `&vs_currencies=usd&include_24hr_change=true`;
+        const headers = { "User-Agent": "ai-crypto-advisor/1.0 (+yourdomain)" };
+        if (process.env.COINGECKO_PRO_API_KEY) {
+          headers["x-cg-pro-api-key"] = process.env.COINGECKO_PRO_API_KEY;
+        } else if (process.env.COINGECKO_DEMO_API_KEY) {
+          headers["x-cg-demo-api-key"] = process.env.COINGECKO_DEMO_API_KEY;
+        }
+        return await doFetchWithHeaders(url, headers);
       } catch (err) {
         console.warn("Price fetch failed, serving cache/fallback:", err.message);
         if (PRICE_CACHE.has(key)) return PRICE_CACHE.get(key).data;
@@ -960,6 +983,30 @@ async function getDashboard(req, res) {
   }
 }
 
+/* ---------------------------
+ * MEME ROUTE (auth required)
+ * ------------------------- */
+// GET /api/dashboard/meme
+async function getMemeHandler(req, res) {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const prefsRow = await getPreferencesByUser(req.userId);
+    const prefs = prefsRow
+      ? {
+          assets: prefsRow.assets ? JSON.parse(prefsRow.assets) : [],
+          investorType: prefsRow.investor_type || "",
+          contentTypes: prefsRow.content_types ? JSON.parse(prefsRow.content_types) : [],
+        }
+      : { assets: [], investorType: "" };
+
+    const meme = await getRandomMemeForUser(req.userId, prefs);
+    return res.json(meme || STATIC_MEMES[0]);
+  } catch (e) {
+    console.warn("[meme] failed:", e.message);
+    return res.json(STATIC_MEMES[0]);
+  }
+}
+
 /* -------------
  * Exports
  * ----------- */
@@ -971,4 +1018,5 @@ module.exports = {
   getRandomMemeForUser, // non-breaking additional export
   getNewsCachedHandler, // GET /api/dashboard/news
   refreshNewsHandler,   // POST /api/dashboard/news/refresh
+  getMemeHandler,       // GET /api/dashboard/meme
 };

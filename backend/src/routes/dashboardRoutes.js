@@ -9,6 +9,7 @@ const {
   fetchPrices,
   getNewsCachedHandler,
   refreshNewsHandler,
+  getMemeHandler,
   getRandomMeme,
   getRandomMemeForUser, // personalized picker (uses user prefs)
 } = require("../controllers/dashboardController");
@@ -63,6 +64,7 @@ router.get("/news/refresh", auth, refreshNewsHandler);
    GET /api/dashboard/meme
    Returns a personalized meme for the user (falls back to generic).
 ----------------------------------------------------------- */
+router.get("/meme", auth, getMemeHandler);
 router.get("/meme", auth, async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
