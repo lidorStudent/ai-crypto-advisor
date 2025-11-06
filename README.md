@@ -24,7 +24,7 @@ crypto-advisor/
 │  │  ├─ utils/
 │  │  ├─ db.js
 │  │  └─ index.js
-│  ├─ database.sqlite # SQLite database (created on first run)
+│  ├─ database.sqlite # SQLite database (created on first run). In the project final submission Turso DB was used.
 │  ├─ .env.example    # Sample environment variables
 │  └─ package.json
 ├─ frontend/          # Vite + React single‑page app
