@@ -13,20 +13,22 @@ const port = Number(process.env.PORT) || 4000;
 /* ──────────────────────────
    Global middlewares
    ────────────────────────── */
-// Allow browser clients (dev-friendly default). Tighten in prod if needed.
 app.use(cors({ origin: true }));
-// Parse JSON bodies (default limit is fine for our use-case).
 app.use(express.json());
 
-// Tiny request logger (great for spotting wrong ports/hosts in dev)
+// Tiny request logger
 app.use((req, _res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
 /* ──────────────────────────
-   Health check (no auth)
+   Root + Health (no auth)
    ────────────────────────── */
+app.get("/", (_req, res) => {
+  res.type("text/plain").send("AI Crypto Advisor API is running. Try GET /health");
+});
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "api", time: new Date().toISOString() });
 });
@@ -39,33 +41,26 @@ const preferencesRoutes = require("./routes/preferencesRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const feedbackRoutes = require("./routes/feedbackRoutes");
 
-// Auth (login/register)
 app.use("/api/auth", authRoutes);
-// User onboarding/preferences (GET/POST)
 app.use("/api/preferences", preferencesRoutes);
-// Alias used by the client during onboarding flows
-app.use("/api/onboarding", preferencesRoutes);
-// Dashboard (news/prices/ai/memes)
+app.use("/api/onboarding", preferencesRoutes); // alias
 app.use("/api/dashboard", dashboardRoutes);
-// Like/Dislike feedback
 app.use("/api/feedback", feedbackRoutes);
 
 /* ──────────────────────────
    404 + error handling
    ────────────────────────── */
-// Fallback for unknown endpoints
 app.use((req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 
-// Catch-all error handler (keep messages generic for clients)
 app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ error: "Internal server error" });
 });
 
 /* ──────────────────────────
-   Crash guards (log and exit)
+   Crash guards
    ────────────────────────── */
 process.on("unhandledRejection", (reason) => {
   console.error("unhandledRejection:", reason);
@@ -80,11 +75,15 @@ process.on("uncaughtException", (err) => {
    ────────────────────────── */
 (async () => {
   try {
-    // Initialize DB schema (safe to call multiple times).
     if (typeof db.init === "function") {
-      await db.init(); // supports sync or async init
+      // supports sync or async init
+      await db.init();
     }
-    console.log("DB_FILE:", process.env.DB_FILE || "(default ./database.sqlite)");
+
+    // Helpful DB location log (works with your DB_FILE env or default)
+    const dbPath = process.env.DB_FILE || "(default ./database.sqlite)";
+    console.log("DB_FILE:", dbPath);
+
     app.listen(port, "0.0.0.0", () => {
       console.log(`Server listening on http://localhost:${port}`);
     });
