@@ -1,6 +1,5 @@
 // backend/src/db.js
 // Tiny SQLite wrapper for users, preferences, and feedback (like/dislike).
-// Goal here: keep it simple, readable, and stable. No functional changes.
 
 const path = require("path");
 const sqlite3 = require("sqlite3").verbose();
